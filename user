@@ -190,3 +190,57 @@ public class JwtUtils {
         return false; // Token is NOT valid
     }
 }
+
+
+package rwtool.security;
+
+import rwtool.model.User;
+import rwtool.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+import java.util.Collection;
+import java.util.Collections;
+
+// This service LOADS user data from database during login
+// Spring Security uses this to verify credentials
+
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService {
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    // This method is called when user tries to login
+    // It fetches user from database by username
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        // Find user in database
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User Not Found with username: " + username));
+        
+        // Convert our User to Spring Security's UserDetails format
+        return new org.springframework.security.core.userdetails.User(
+                user.getUsername(),
+                user.getPassword(), // This is the HASHED password
+                user.getIsActive(), // Is account active?
+                true, // Account not expired
+                true, // Credentials not expired
+                true, // Account not locked
+                getAuthorities(user) // User's roles/permissions
+        );
+    }
+    
+    // Convert user role to Spring Security authority
+    // Example: Role.USER becomes "ROLE_USER"
+    private Collection<? extends GrantedAuthority> getAuthorities(User user) {
+        return Collections.singletonList(
+                new SimpleGrantedAuthority("ROLE_" + user.getRole().name())
+        );
+    }
+}
