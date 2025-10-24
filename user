@@ -65,3 +65,42 @@ public enum Role {
     ADMIN,  // Admin role (can manage users, reports, approvals)
     OPS     // Operations role (handles data syncing, storage)
 }
+
+
+package rwtool.repository;
+
+import rwtool.model.Role;
+import rwtool.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+// This is the DATABASE ACCESS LAYER
+// It provides methods to interact with the "users" table
+// Spring automatically implements these methods!
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+    
+    // Find user by username
+    // SQL equivalent: SELECT * FROM users WHERE username = ?
+    Optional<User> findByUsername(String username);
+    
+    // Find user by email
+    Optional<User> findByEmail(String email);
+    
+    // Find user by username AND role (important for role-specific login)
+    // SQL: SELECT * FROM users WHERE username = ? AND role = ?
+    Optional<User> findByUsernameAndRole(String username, Role role);
+    
+    // Find user by email AND role
+    Optional<User> findByEmailAndRole(String email, Role role);
+    
+    // Check if username already exists (for signup validation)
+    // Returns true/false
+    Boolean existsByUsername(String username);
+    
+    // Check if email already exists
+    Boolean existsByEmail(String email);
+}
