@@ -53,3 +53,15 @@ public class User {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }
+
+
+package rwtool.model;
+
+// This is an ENUM - a fixed set of constants
+// Think of it like multiple choice: USER, ADMIN, or OPS only
+
+public enum Role {
+    USER,   // Regular user role
+    ADMIN,  // Admin role (can manage users, reports, approvals)
+    OPS     // Operations role (handles data syncing, storage)
+}
