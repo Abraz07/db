@@ -104,3 +104,22 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Check if email already exists
     Boolean existsByEmail(String email);
 }
+
+package rwtool.dto;
+
+import rwtool.model.Role;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+// This is what frontend sends when user tries to LOGIN
+// Example: { "username": "john", "password": "pass123", "role": "USER" }
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class LoginRequest {
+    private String username;  // User enters username
+    private String password;  // User enters password
+    private Role role;        // Which login page? USER/ADMIN/OPS
+}
