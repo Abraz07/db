@@ -1,0 +1,55 @@
+package rwtool.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDateTime;
+
+// This class represents a USER in your database
+// Think of it as a blueprint for how user data is stored
+
+@Entity // This tells Spring: "This is a database table"
+@Table(name = "users") // Table name in PostgreSQL will be "users"
+@Data // Lombok: Auto-generates getters, setters, toString
+@NoArgsConstructor // Creates empty constructor
+@AllArgsConstructor // Creates constructor with all fields
+public class User {
+    
+    @Id // This is the Primary Key (unique identifier)
+    @GeneratedValue(strategy = GenerationType.IDENTITY) // Auto-increment
+    private Long id;
+    
+    @Column(nullable = false, unique = true) // Username must be unique
+    private String username;
+    
+    @Column(nullable = false, unique = true) // Email must be unique
+    private String email;
+    
+    @Column(nullable = false) // Password is required
+    private String password; // Will be encrypted (hashed)
+    
+    @Column(name = "full_name")
+    private String fullName;
+    
+    @Column(name = "phone_number")
+    private String phoneNumber;
+    
+    @Enumerated(EnumType.STRING) // Store role as text (USER, ADMIN, OPS)
+    @Column(nullable = false)
+    private Role role; // USER, ADMIN, or OPS
+    
+    @Column(name = "is_active")
+    private Boolean isActive = true; // Account active or not
+    
+    @CreationTimestamp // Automatically sets creation time
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+    
+    @UpdateTimestamp // Automatically updates when modified
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+}
