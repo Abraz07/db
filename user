@@ -364,3 +364,100 @@ public class AuthEntryPointJwt implements AuthenticationEntryPoint {
         mapper.writeValue(response.getOutputStream(), body);
     }
 }
+
+
+package rwtool.service;
+
+import rwtool.dto.LoginRequest;
+import rwtool.dto.SignupRequest;
+import rwtool.dto.AuthResponse;
+import rwtool.model.User;
+import rwtool.repository.UserRepository;
+import rwtool.security.JwtUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+// This is the BUSINESS LOGIC layer
+// Contains the actual login and signup logic
+
+@Service
+public class AuthService {
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    @Autowired
+    private PasswordEncoder passwordEncoder; // To hash passwords
+    
+    @Autowired
+    private AuthenticationManager authenticationManager; // To verify credentials
+    
+    @Autowired
+    private JwtUtils jwtUtils; // To generate tokens
+    
+    // LOGIN method
+    public AuthResponse login(LoginRequest loginRequest) {
+        // Step 1: Find user with matching username AND role
+        User user = userRepository.findByUsernameAndRole(loginRequest.getUsername(), loginRequest.getRole())
+                .orElseThrow(() -> new RuntimeException("Invalid credentials or role"));
+        
+        // Step 2: Verify password (Spring Security does this)
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        loginRequest.getUsername(),
+                        loginRequest.getPassword()
+                )
+        );
+        
+        // Step 3: Set authentication in context
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        
+        // Step 4: Generate JWT token
+        String jwt = jwtUtils.generateJwtToken(authentication);
+        
+        // Step 5: Return response with token and user details
+        return new AuthResponse(
+                jwt,
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getRole()
+        );
+    }
+    
+    // SIGNUP method
+    public String signup(SignupRequest signupRequest) {
+        // Step 1: Check if username already exists
+        if (userRepository.existsByUsername(signupRequest.getUsername())) {
+            throw new RuntimeException("Username is already taken!");
+        }
+        
+        // Step 2: Check if email already exists
+        if (userRepository.existsByEmail(signupRequest.getEmail())) {
+            throw new RuntimeException("Email is already in use!");
+        }
+        
+        // Step 3: Create new user object
+        User user = new User();
+        user.setUsername(signupRequest.getUsername());
+        user.setEmail(signupRequest.getEmail());
+        
+        // Step 4: HASH the password before saving (NEVER store plain passwords!)
+        user.setPassword(passwordEncoder.encode(signupRequest.getPassword()));
+        
+        user.setFullName(signupRequest.getFullName());
+        user.setPhoneNumber(signupRequest.getPhoneNumber());
+        user.setRole(signupRequest.getRole());
+        user.setIsActive(true); // Account is active by default
+        
+        // Step 5: Save to database
+        userRepository.save(user);
+        
+        return "User registered successfully!";
+    }
+}
