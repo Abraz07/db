@@ -461,3 +461,275 @@ public class AuthService {
         return "User registered successfully!";
     }
 }
+
+
+package rwtool.controller;
+
+import rwtool.dto.AuthResponse;
+import rwtool.dto.LoginRequest;
+import rwtool.dto.MessageResponse;
+import rwtool.dto.SignupRequest;
+import rwtool.model.Role;
+import rwtool.service.AuthService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+// This is the API ENDPOINT layer
+// Frontend calls these URLs to login/signup
+// Think of it as the "reception desk" that receives requests
+
+@RestController
+@RequestMapping("/api/auth") // Base URL: /api/auth
+@CrossOrigin(origins = "*", maxAge = 3600) // Allow requests from frontend
+public class AuthController {
+    
+    @Autowired
+    private AuthService authService;
+    
+    // USER LOGIN - URL: POST /api/auth/user/login
+    @PostMapping("/user/login")
+    public ResponseEntity<?> userLogin(@RequestBody LoginRequest loginRequest) {
+        try {
+            loginRequest.setRole(Role.USER); // Force role to USER
+            AuthResponse response = authService.login(loginRequest);
+            return ResponseEntity.ok(response); // Return token + user details
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(new MessageResponse("Error: " + e.getMessage()));
+        }
+    }
+    
+    // ADMIN LOGIN - URL: POST /api/auth/admin/login
+    @PostMapping("/admin/login")
+    public ResponseEntity<?> adminLogin(@RequestBody LoginRequest loginRequest) {
+        try {
+            loginRequest.setRole(Role.ADMIN); // Force role to ADMIN
+            AuthResponse response = authService.login(loginRequest);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(new MessageResponse("Error: " + e.getMessage()));
+        }
+    }
+    
+    // OPS LOGIN - URL: POST /api/auth/ops/login
+    @PostMapping("/ops/login")
+    public ResponseEntity<?> opsLogin(@RequestBody LoginRequest loginRequest) {
+        try {
+            loginRequest.setRole(Role.OPS); // Force role to OPS
+            AuthResponse response = authService.login(loginRequest);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(new MessageResponse("Error: " + e.getMessage()));
+        }
+    }
+    
+    // SIGNUP - URL: POST /api/auth/signup
+    // Common signup for all roles
+    @PostMapping("/signup")
+    public ResponseEntity<?> signup(@RequestBody SignupRequest signupRequest) {
+        try {
+            String message = authService.signup(signupRequest);
+            return ResponseEntity.ok(new MessageResponse(message));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(new MessageResponse("Error: " + e.getMessage()));
+        }
+    }
+}
+
+package rwtool.config;
+
+import rwtool.security.AuthEntryPointJwt;
+import rwtool.security.AuthTokenFilter;
+import rwtool.security.UserDetailsServiceImpl;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+// This is the MAIN SECURITY CONFIGURATION
+// It tells Spring Security how to protect your application
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class SecurityConfig {
+    
+    @Autowired
+    private UserDetailsServiceImpl userDetailsService;
+    
+    @Autowired
+    private AuthEntryPointJwt unauthorizedHandler;
+    
+    // Create the JWT filter bean
+    @Bean
+    public AuthTokenFilter authenticationJwtTokenFilter() {
+        return new AuthTokenFilter();
+    }
+    
+    // Configure authentication provider (how to verify users)
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        return authProvider;
+    }
+    
+    // Authentication manager bean
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+    
+    // Password encoder - uses BCrypt to hash passwords
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    
+    // Main security filter chain - defines which URLs are protected
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http.csrf(csrf -> csrf.disable()) // Disable CSRF for REST API
+                .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // No sessions, use JWT
+                .authorizeHttpRequests(auth -> 
+                    auth
+                        // Allow everyone to access signup/login endpoints
+                        .requestMatchers("/api/auth/**").permitAll()
+                        
+                        // Protect role-specific endpoints
+                        .requestMatchers("/api/user/**").hasRole("USER")
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/ops/**").hasRole("OPS")
+                        
+                        // All other requests need authentication
+                        .anyRequest().authenticated()
+                );
+        
+        http.authenticationProvider(authenticationProvider());
+        
+        // Add JWT filter before Spring Security's authentication filter
+        http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
+        
+        return http.build();
+    }
+}
+
+# ===========================================
+# Azure PostgreSQL Database Configuration
+# ===========================================
+# Replace with your actual Azure PostgreSQL credentials
+spring.datasource.url=jdbc:postgresql://YOUR-SERVER-NAME.postgres.database.azure.com:5432/YOUR-DATABASE-NAME?sslmode=require
+spring.datasource.username=YOUR-USERNAME@YOUR-SERVER-NAME
+spring.datasource.password=YOUR-PASSWORD
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+# ===========================================
+# JPA / Hibernate Configuration
+# ===========================================
+# Hibernate will automatically create/update tables based on your Entity classes
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+# ===========================================
+# JWT Configuration
+# ===========================================
+# Secret key for signing JWT tokens (CHANGE THIS IN PRODUCTION!)
+rw24.app.jwtSecret=RW24SecretKeyChangeThisToSomethingVerySecureInProduction
+# Token expiration time in milliseconds (86400000 ms = 24 hours)
+rw24.app.jwtExpirationMs=86400000
+
+# ===========================================
+# Server Configuration
+# ===========================================
+server.port=8080
+
+# ===========================================
+# Logging (for debugging)
+# ===========================================
+logging.level.org.springframework.security=DEBUG
+logging.level.rwtool=DEBUG
+
+<!-- Add these dependencies inside <dependencies> tag in pom.xml -->
+
+<!-- Spring Boot Starter Web - For REST APIs -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+
+<!-- Spring Boot Starter Data JPA - For database operations -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+
+<!-- Spring Boot Starter Security - For authentication/authorization -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+
+<!-- PostgreSQL Driver - To connect to PostgreSQL database -->
+<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <scope>runtime</scope>
+</dependency>
+
+<!-- JWT Dependencies - For creating and validating tokens -->
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt-api</artifactId>
+    <version>0.11.5</version>
+</dependency>
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt-impl</artifactId>
+    <version>0.11.5</version>
+    <scope>runtime</scope>
+</dependency>
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt-jackson</artifactId>
+    <version>0.11.5</version>
+    <scope>runtime</scope>
+</dependency>
+
+<!-- Lombok - For reducing boilerplate code (@Data, @NoArgsConstructor, etc.) -->
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <optional>true</optional>
+</dependency>
+
+<!-- Spring Boot Starter Test - For testing -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-test</artifactId>
+    <scope>test</scope>
+</dependency>
+
+<!-- Spring Security Test -->
+<dependency>
+    <groupId>org.springframework.security</groupId>
+    <artifactId>spring-security-test</artifactId>
+    <scope>test</scope>
+</dependency>
