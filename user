@@ -21,7 +21,9 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable()) // Disable CSRF for development
             .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Enable CORS
             .authorizeHttpRequests(auth -> auth
-                .anyRequest().permitAll() // Allow all requests without authentication for development
+                .requestMatchers("/api/**").permitAll() // Allow all API endpoints without authentication
+                .requestMatchers("/v3/api-docs/*", "/swagger-ui/*", "/swagger-ui.html").permitAll() // Allow Swagger
+                .anyRequest().permitAll() // Allow everything else for now (change to .authenticated() when JWT is ready)
             );
         
         return http.build();
