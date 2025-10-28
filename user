@@ -21,59 +21,11 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable()) // Disable CSRF for development
             .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Enable CORS
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints - no authentication required
-                .requestMatchers("/api/auth/**").permitAll() // Authentication endpoints (login, register)
-                .requestMatchers("/api/domains/**").permitAll() // Domain management (YOUR CODE)
-                .requestMatchers("/api/subscriptions/**").permitAll() // Subscription management (YOUR CODE)
-                // Swagger/OpenAPI endpoints
-                .requestMatchers("/v3/api-docs/**").permitAll()
-                .requestMatchers("/swagger-ui/**").permitAll()
-                .requestMatchers("/swagger-ui.html").permitAll()
-                .requestMatchers("/swagger-resources/**").permitAll()
-                .requestMatchers("/webjars/**").permitAll()
-                // All other endpoints require authentication (YOUR FRIEND'S CODE)
-                .anyRequest().authenticated()
+                .anyRequest().permitAll() // Allow all requests without authentication for development
             );
         
         return http.build();
     }
-    
-    /* 
-     * TODO: For your friend to add JWT Authentication
-     * 
-     * Add these fields at the top of the class:
-     * 
-     * @Autowired
-     * private CustomUserDetailsService userDetailsService;
-     * 
-     * @Autowired
-     * private JwtAuthenticationFilter jwtAuthenticationFilter;
-     * 
-     * Then add these beans below:
-     * 
-     * @Bean
-     * public PasswordEncoder passwordEncoder() {
-     *     return new BCryptPasswordEncoder();
-     * }
-     * 
-     * @Bean
-     * public DaoAuthenticationProvider authenticationProvider() {
-     *     DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-     *     authProvider.setUserDetailsService(userDetailsService);
-     *     authProvider.setPasswordEncoder(passwordEncoder());
-     *     return authProvider;
-     * }
-     * 
-     * @Bean
-     * public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
-     *     return authConfig.getAuthenticationManager();
-     * }
-     * 
-     * And update the securityFilterChain method to add:
-     *     .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-     *     .authenticationProvider(authenticationProvider())
-     *     .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-     */
     
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
