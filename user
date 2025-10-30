@@ -386,3 +386,69 @@ const DownloadReportComponent = () => {
     );
 };
 export default DownloadReportComponent;
+
+
+
+
+
+/**
+ * Authentication utility functions for managing user session
+ */
+
+const AUTH_TOKEN_KEY = 'auth_token';
+const USER_DATA_KEY = 'user_data';
+
+export const authUtils = {
+    /**
+     * Save authentication data to localStorage
+     */
+    saveAuthData: (authResponse) => {
+        localStorage.setItem(AUTH_TOKEN_KEY, authResponse.token);
+        localStorage.setItem(USER_DATA_KEY, JSON.stringify({
+            id: authResponse.userId,
+            email: authResponse.email,
+            name: authResponse.fullName,
+            role: authResponse.role
+        }));
+    },
+
+    /**
+     * Get authentication token
+     */
+    getToken: () => {
+        return localStorage.getItem(AUTH_TOKEN_KEY);
+    },
+
+    /**
+     * Get current user data
+     */
+    getCurrentUser: () => {
+        const userData = localStorage.getItem(USER_DATA_KEY);
+        return userData ? JSON.parse(userData) : null;
+    },
+
+    /**
+     * Check if user is logged in
+     */
+    isAuthenticated: () => {
+        return !!localStorage.getItem(AUTH_TOKEN_KEY);
+    },
+
+    /**
+     * Clear authentication data (logout)
+     */
+    logout: () => {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem(USER_DATA_KEY);
+    },
+
+    /**
+     * Get authorization header for API requests
+     */
+    getAuthHeader: () => {
+        const token = authUtils.getToken();
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+};
+
+export default authUtils;
