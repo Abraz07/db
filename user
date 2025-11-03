@@ -1,3 +1,6 @@
+ background: linear-gradient(135deg, #dc2626 0%, #991b1b 50%, #7f1d1d 100%);
+
+
 AuditLogController
 
 
