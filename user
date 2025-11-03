@@ -1,3 +1,359 @@
+package com.rwtool.model;
+
+import jakarta.persistence.*;
+import org.hibernate.annotations.CreationTimestamp;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "user_notifications", indexes = {
+        @Index(name = "idx_user_notifications_user_email", columnList = "user_email"),
+        @Index(name = "idx_user_notifications_source", columnList = "source_id")
+})
+public class UserNotification {
+
+    public enum Type {
+        accepted,
+        rejected,
+        file
+    }
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+
+    @Column(name = "user_email", nullable = false)
+    private String userEmail;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Type type;
+
+    @Column(nullable = false)
+    private String title;
+
+    @Column(nullable = false, length = 2000)
+    private String message;
+
+    @CreationTimestamp
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "is_read", nullable = false)
+    private boolean read = false;
+
+    @Column(name = "source_id", unique = true)
+    private String sourceId;
+
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
+    public String getUserEmail() { return userEmail; }
+    public void setUserEmail(String userEmail) { this.userEmail = userEmail; }
+    public Type getType() { return type; }
+    public void setType(Type type) { this.type = type; }
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public boolean isRead() { return read; }
+    public void setRead(boolean read) { this.read = read; }
+    public String getSourceId() { return sourceId; }
+    public void setSourceId(String sourceId) { this.sourceId = sourceId; }
+}
+
+
+
+
+package com.rwtool.repository;
+
+import com.rwtool.model.UserNotification;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface UserNotificationRepository extends JpaRepository<UserNotification, String> {
+    List<UserNotification> findByUserEmailOrderByCreatedAtDesc(String userEmail);
+    long countByUserEmailAndReadIsFalse(String userEmail);
+    long deleteByUserEmail(String userEmail);
+    Optional<UserNotification> findBySourceId(String sourceId);
+}
+
+
+
+package com.rwtool.service;
+
+import com.rwtool.model.UserNotification;
+import com.rwtool.model.UserGroup;
+import com.rwtool.repository.UserNotificationRepository;
+import com.rwtool.repository.UserGroupRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+@Service
+public class NotificationService {
+
+    @Autowired
+    private UserNotificationRepository notificationRepository;
+
+    @Autowired
+    private UserGroupRepository userGroupRepository;
+
+    public List<UserNotification> getUserNotifications(String userEmail) {
+        return notificationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail);
+    }
+
+    public long countUnread(String userEmail) {
+        return notificationRepository.countByUserEmailAndReadIsFalse(userEmail);
+    }
+
+    @Transactional
+    public void markAllAsRead(String userEmail) {
+        List<UserNotification> list = notificationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail);
+        for (UserNotification n : list) {
+            if (!n.isRead()) {
+                n.setRead(true);
+            }
+        }
+        notificationRepository.saveAll(list);
+    }
+
+    @Transactional
+    public void clearForUser(String userEmail) {
+        notificationRepository.deleteByUserEmail(userEmail);
+    }
+
+    @Transactional
+    public void notifyUsersFileSent(String folder, String fileName) {
+        // Find all group members who have access to this folder
+        Set<String> recipients = new HashSet<>();
+        List<UserGroup> groups = userGroupRepository.findAll();
+        for (UserGroup g : groups) {
+            if (g.getFolderAccess() != null && g.getFolderAccess().contains(folder)) {
+                if (g.getMembers() != null) {
+                    recipients.addAll(g.getMembers());
+                }
+            }
+        }
+
+        if (recipients.isEmpty()) return;
+
+        String title = "New Report Available";
+        String message = "A new file '" + fileName + "' was added to domain '" + folder + "'.";
+        String sourceId = (folder + ":" + fileName).toLowerCase();
+
+        for (String email : recipients) {
+            // avoid duplicate for same source
+            if (notificationRepository.findBySourceId(sourceId).isPresent()) continue;
+
+            UserNotification n = new UserNotification();
+            n.setUserEmail(email);
+            n.setType(UserNotification.Type.file);
+            n.setTitle(title);
+            n.setMessage(message);
+            n.setSourceId(sourceId);
+            n.setRead(false);
+            notificationRepository.save(n);
+        }
+    }
+}
+
+
+package com.rwtool.controller;
+
+import com.rwtool.model.UserNotification;
+import com.rwtool.service.NotificationService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/notifications")
+@CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"}, allowCredentials = "true")
+public class NotificationController {
+
+    @Autowired
+    private NotificationService notificationService;
+
+    @GetMapping
+    public ResponseEntity<List<UserNotification>> list(@RequestParam String userEmail,
+                                                       @RequestParam(required = false, defaultValue = "false") boolean unreadOnly) {
+        try {
+            List<UserNotification> list = unreadOnly ?
+                    notificationService.getUnreadNotifications(userEmail) :
+                    notificationService.getUserNotifications(userEmail);
+            return ResponseEntity.ok(list);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping("/mark-all-read")
+    public ResponseEntity<Void> markAllRead(@RequestParam String userEmail) {
+        notificationService.markAllAsRead(userEmail);
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/clear")
+    public ResponseEntity<Void> clear(@RequestParam String userEmail) {
+        notificationService.clearForUser(userEmail);
+        return ResponseEntity.ok().build();
+    }
+}
+
+
+package com.rwtool.controller;
+
+import com.rwtool.service.RoutingService;
+import com.rwtool.service.NotificationService;
+import com.rwtool.service.AuditLogService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+import java.util.Map;
+import java.util.List;
+
+@RestController
+@CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"}, allowCredentials = "false")
+@RequestMapping("/api/routing")
+public class RoutingController {
+
+    private final RoutingService routingService;
+    
+    @Autowired
+    private AuditLogService auditLogService;
+
+    @Autowired
+    private NotificationService notificationService;
+
+    public RoutingController(RoutingService routingService) {
+        this.routingService = routingService;
+    }
+
+    @PostMapping("/run")
+    public ResponseEntity<Map<String, Object>> runNow() {
+        try {
+            Map<String, Object> result = routingService.runRoutingNow();
+            auditLogService.logActivity(
+                "system", // TODO: Get actual admin email from security context
+                "Admin",
+                "BULK_ROUTING_EXECUTED",
+                "Admin executed bulk file routing",
+                "success"
+            );
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            auditLogService.logActivity(
+                "system",
+                "Admin",
+                "BULK_ROUTING_FAILED",
+                "Failed to execute bulk file routing: " + e.getMessage(),
+                "failed"
+            );
+            throw e;
+        }
+    }
+
+    @PostMapping("/dry-run")
+    public ResponseEntity<List<RoutingService.DryRunDecision>> dryRun(@RequestBody List<String> fileNames) {
+        return ResponseEntity.ok(routingService.dryRunDecisions(fileNames));
+    }
+
+    @GetMapping("/incoming")
+    public ResponseEntity<List<Map<String, Object>>> listIncoming() {
+        return ResponseEntity.ok(routingService.listIncomingFiles());
+    }
+
+    @PostMapping("/route-one")
+    public ResponseEntity<Map<String, Object>> routeOne(@RequestParam("fileName") String fileName) {
+        System.out.println("=== FILE ROUTING DEBUG ===");
+        System.out.println("Routing file: " + fileName);
+        try {
+            Map<String, Object> result = routingService.routeSingle(fileName);
+            System.out.println("Routing result: " + result);
+            boolean moved = result.get("moved") != null && (Boolean) result.get("moved");
+            System.out.println("File moved: " + moved);
+            
+            if (moved) {
+                System.out.println("Logging successful file routing...");
+                auditLogService.logActivity(
+                    "system", // TODO: Get actual admin email from security context
+                    "Admin",
+                    "FILE_ROUTED",
+                    "Admin sent file to destination: " + fileName,
+                    "success"
+                );
+                // Notify users who have access to this folder/domain
+                try {
+                    String folder = (String) result.get("folder");
+                    if (folder == null || folder.isEmpty()) {
+                        // Derive from destination path: .../reports/<Folder>/<file>
+                        String dest = (String) result.get("destination");
+                        if (dest != null) {
+                            String norm = dest.replace('\\', '/');
+                            int idx = norm.indexOf("/reports/");
+                            if (idx >= 0) {
+                                String after = norm.substring(idx + "/reports/".length());
+                                int slash = after.indexOf('/');
+                                if (slash > 0) folder = after.substring(0, slash);
+                            }
+                        }
+                    }
+                    if (folder != null && !folder.isEmpty()) {
+                        notificationService.notifyUsersFileSent(folder, fileName);
+                    }
+                } catch (Exception notifyEx) {
+                    System.out.println("Notification publish failed: " + notifyEx.getMessage());
+                }
+                System.out.println("Audit log created for successful routing");
+            } else {
+                String reason = result.get("reason") != null ? result.get("reason").toString() : "Unknown reason";
+                System.out.println("Logging failed file routing, reason: " + reason);
+                auditLogService.logActivity(
+                    "system",
+                    "Admin",
+                    "FILE_ROUTING_FAILED",
+                    "Failed to route file: " + fileName + ". Reason: " + reason,
+                    "failed"
+                );
+                System.out.println("Audit log created for failed routing");
+            }
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            System.out.println("Exception during routing: " + e.getMessage());
+            auditLogService.logActivity(
+                "system",
+                "Admin",
+                "FILE_ROUTING_ERROR",
+                "Error routing file: " + fileName + ". Error: " + e.getMessage(),
+                "failed"
+            );
+            System.out.println("Audit log created for routing error");
+            throw e;
+        }
+    }
+}
+
+
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Bell, X, UserPlus, FileText, LogIn } from 'lucide-react';
 import './AdminNotification.css';
@@ -198,12 +554,3 @@ const AdminNotification = () => {
 };
 
 export default AdminNotification;
-
-
-
-
-
-
-
-
-
