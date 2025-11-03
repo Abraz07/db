@@ -101,24 +101,6 @@ public class AuditLogController {
         }
     }
     
-    // Test endpoint to create sample audit logs (for testing only)
-    @PostMapping("/test-data")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<String> createTestData() {
-        try {
-            // Create some test audit logs
-            auditLogService.logActivity("admin@rwtool.com", "Admin", "USER_LOGIN", "Admin logged in successfully", "success");
-            auditLogService.logActivity("user@rwtool.com", "Subscriber", "USER_LOGIN", "User logged in successfully", "success");
-            auditLogService.logActivity("admin@rwtool.com", "Admin", "DOMAIN_ADDED", "Added new domain: test.com", "success");
-            auditLogService.logActivity("ops@rwtool.com", "Ops", "FILE_UPLOADED", "Ops user uploaded file: test.pdf", "success");
-            auditLogService.logActivity("admin@rwtool.com", "Admin", "FILE_ROUTED", "Admin sent file to destination: report.pdf", "success");
-            
-            return ResponseEntity.ok("Test audit logs created successfully");
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body("Failed to create test audit logs: " + e.getMessage());
-        }
-    }
-    
     // Export audit logs as CSV
     @GetMapping("/export")
     @PreAuthorize("hasRole('ADMIN')")
@@ -183,10 +165,8 @@ public class AuditLogController {
 
 
 
-
-
-
 AuditLogService
+
 
 package com.rwtool.service;
 
@@ -201,7 +181,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -211,21 +190,6 @@ public class AuditLogService {
     
     @Autowired
     private AuditLogRepository auditLogRepository;
-    
-    // Initialize with minimal test data if empty
-    @jakarta.annotation.PostConstruct
-    public void initializeIfEmpty() {
-        try {
-            if (auditLogRepository.count() == 0) {
-                // Create a few test entries
-                logActivity("admin@test.com", "Admin", "USER_LOGIN", "Test admin login", "success");
-                logActivity("user@test.com", "Subscriber", "USER_LOGIN", "Test user login", "success");
-            }
-        } catch (Exception e) {
-            System.err.println("Failed to initialize audit logs: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
     
     // Create audit log entry
     public void logActivity(String userEmail, String role, String action, String details, String status) {
@@ -286,27 +250,24 @@ public class AuditLogService {
         }
     }
     
-    // Get all unique actions for filter dropdown
+    // Get all unique actions for filter dropdown - dynamically from database
     public List<String> getAllActions() {
-        // Return basic action types instead of querying database
-        List<String> actions = new ArrayList<>();
-        actions.add("USER_LOGIN");
-        actions.add("USER_SIGNUP");
-        actions.add("DOMAIN_ADDED");
-        actions.add("FILE_ROUTED");
-        actions.add("FILE_UPLOADED");
-        actions.add("FILE_DOWNLOADED");
-        return actions;
+        try {
+            return auditLogRepository.findDistinctActions();
+        } catch (Exception e) {
+            System.err.println("Error fetching distinct actions: " + e.getMessage());
+            return new ArrayList<>();
+        }
     }
     
-    // Get all unique roles for filter dropdown
+    // Get all unique roles for filter dropdown - dynamically from database
     public List<String> getAllRoles() {
-        // Return basic role types instead of querying database
-        List<String> roles = new ArrayList<>();
-        roles.add("Admin");
-        roles.add("Subscriber");
-        roles.add("Ops");
-        return roles;
+        try {
+            return auditLogRepository.findDistinctRoles();
+        } catch (Exception e) {
+            System.err.println("Error fetching distinct roles: " + e.getMessage());
+            return new ArrayList<>();
+        }
     }
     
     // Get all audit logs for export (no pagination)
@@ -334,302 +295,70 @@ public class AuditLogService {
 
 
 
+AuditLogRepository
+
+package com.rwtool.repository;
+
+import com.rwtool.model.AuditLog;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Repository
+public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
+    
+    // Find logs by user email
+    List<AuditLog> findByUserEmailContainingIgnoreCase(String userEmail);
+    
+    // Find logs by action
+    List<AuditLog> findByAction(String action);
+    
+    // Find logs by role
+    List<AuditLog> findByRole(String role);
+    
+    // Find logs by status
+    List<AuditLog> findByStatus(String status);
+    
+    // Find logs within date range
+    List<AuditLog> findByTimestampBetween(LocalDateTime startDate, LocalDateTime endDate);
+    
+    // Find recent logs (limit)
+    List<AuditLog> findTop10ByOrderByTimestampDesc();
+    
+    // Complex search with filters
+    @Query("SELECT a FROM AuditLog a WHERE " +
+           "(:userEmail IS NULL OR LOWER(a.userEmail) LIKE LOWER(CONCAT('%', :userEmail, '%'))) AND " +
+           "(:action IS NULL OR a.action = :action) AND " +
+           "(:role IS NULL OR a.role = :role) AND " +
+           "(:status IS NULL OR a.status = :status) AND " +
+           "(:startDate IS NULL OR a.timestamp >= :startDate) AND " +
+           "(:endDate IS NULL OR a.timestamp <= :endDate) AND " +
+           "(:searchTerm IS NULL OR (" +
+           "LOWER(a.details) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+           "LOWER(a.userEmail) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+           "LOWER(a.action) LIKE LOWER(CONCAT('%', :searchTerm, '%'))))")
+    Page<AuditLog> findWithFilters(@Param("userEmail") String userEmail,
+                                   @Param("action") String action,
+                                   @Param("role") String role,
+                                   @Param("status") String status,
+                                   @Param("startDate") LocalDateTime startDate,
+                                   @Param("endDate") LocalDateTime endDate,
+                                   @Param("searchTerm") String searchTerm,
+                                   Pageable pageable);
+    
+    // Get distinct actions dynamically
+    @Query("SELECT DISTINCT a.action FROM AuditLog a ORDER BY a.action")
+    List<String> findDistinctActions();
+    
+    // Get distinct roles dynamically
+    @Query("SELECT DISTINCT a.role FROM AuditLog a ORDER BY a.role")
+    List<String> findDistinctRoles();
+}
 
 
-
-AuditLogs
-
-import React, { useState, useEffect } from 'react';
-import { Download, Clock, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
-import 'bootstrap/dist/css/bootstrap.min.css';
-import './AuditLogs.css';
-import axios from 'axios';
-
-const AuditLogs = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterAction, setFilterAction] = useState('All Actions');
-  const [filterRole, setFilterRole] = useState('All Users');
-  const [dateRange, setDateRange] = useState('7days');
-  const [currentPage, setCurrentPage] = useState(1);
-  const recordsPerPage = 10;
-  const [auditData, setAuditData] = useState([]);
-  const [recentActivity, setRecentActivity] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalRecords, setTotalRecords] = useState(0);
-  const [availableActions, setAvailableActions] = useState([]);
-  const [availableRoles, setAvailableRoles] = useState([]);
-
-  // API base URL
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api';
-
-  // Get auth token from localStorage
-  const getAuthToken = () => {
-    return localStorage.getItem('token');
-  };
-
-  // API call to fetch audit logs
-  const fetchAuditLogs = async () => {
-    setLoading(true);
-    try {
-      const token = getAuthToken();
-      const params = {
-        page: currentPage - 1, // Backend uses 0-based indexing
-        size: recordsPerPage,
-        dateRange: dateRange,
-        searchTerm: searchTerm || undefined,
-        action: filterAction !== 'All Actions' ? filterAction : undefined,
-        role: filterRole !== 'All Users' ? filterRole : undefined
-      };
-
-      const response = await axios.get(`${API_BASE_URL}/audit/logs`, {
-        params,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.data) {
-        setAuditData(response.data.content || []);
-        setTotalPages(response.data.totalPages || 0);
-        setTotalRecords(response.data.totalElements || 0);
-      }
-    } catch (error) {
-      console.error('Error fetching audit logs:', error);
-      setAuditData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // API call to fetch recent activity
-  const fetchRecentActivity = async () => {
-    try {
-      const token = getAuthToken();
-      const response = await axios.get(`${API_BASE_URL}/audit/recent`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.data) {
-        setRecentActivity(response.data);
-      }
-    } catch (error) {
-      console.error('Error fetching recent activity:', error);
-      setRecentActivity([]);
-    }
-  };
-
-  // API call to fetch available actions and roles for filters
-  const fetchFilterOptions = async () => {
-    try {
-      const token = getAuthToken();
-      const [actionsResponse, rolesResponse] = await Promise.all([
-        axios.get(`${API_BASE_URL}/audit/actions`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        axios.get(`${API_BASE_URL}/audit/roles`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
-
-      setAvailableActions(['All Actions', ...(actionsResponse.data || [])]);
-      setAvailableRoles(['All Users', ...(rolesResponse.data || [])]);
-    } catch (error) {
-      console.error('Error fetching filter options:', error);
-      // Set minimal default options if API fails
-      setAvailableActions(['All Actions']);
-      setAvailableRoles(['All Users']);
-    }
-  };
-
-  // Calculate pagination info
-  const indexOfLastRecord = currentPage * recordsPerPage;
-  const indexOfFirstRecord = indexOfLastRecord - recordsPerPage;
-  const currentRecords = auditData; // Data is already paginated from backend
-
-  // Load data on component mount and when filters change
-  useEffect(() => {
-    fetchFilterOptions();
-    fetchRecentActivity();
-  }, []);
-
-  useEffect(() => {
-    fetchAuditLogs();
-  }, [currentPage, searchTerm, filterAction, filterRole, dateRange]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, filterAction, filterRole, dateRange]);
-
-  // Export audit logs as CSV
-  const handleExportLogs = async () => {
-    try {
-      const token = getAuthToken();
-      const params = {
-        dateRange: dateRange,
-        searchTerm: searchTerm || undefined,
-        action: filterAction !== 'All Actions' ? filterAction : undefined,
-        role: filterRole !== 'All Users' ? filterRole : undefined
-      };
-
-      const response = await axios.get(`${API_BASE_URL}/audit/export`, {
-        params,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        responseType: 'blob' // Important for file download
-      });
-
-      // Create a download link and trigger download
-      const blob = new Blob([response.data], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      
-      // Generate filename with timestamp
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      link.download = `audit_logs_${timestamp}.csv`;
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-      
-      console.log('Audit logs exported successfully');
-    } catch (error) {
-      console.error('Error exporting audit logs:', error);
-      alert('Failed to export audit logs. Please try again.');
-    }
-  };
-
-  return (
-    <div className="audit-logs-container">
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
-        <div>
-          <h2 className="audit-title">Audit Logs</h2>
-          <p className="audit-subtitle">Monitor all admin and subscriber activities in real-time</p>
-        </div>
-        <button className="btn btn-export" onClick={handleExportLogs}>
-          <Download size={18} className="me-2" />
-          Export Logs
-        </button>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="info-card mb-4">
-        <h5 className="card-header-title">
-          <Clock size={20} className="me-2" />
-          Recent Activity
-        </h5>
-        <div className="timeline">
-          {loading ? (
-            <div className="text-center py-3">
-              <div className="spinner-border text-primary" role="status">
-                <span className="visually-hidden">Loading...</span>
-              </div>
-            </div>
-          ) : recentActivity.length > 0 ? (
-            recentActivity.slice(0, 5).map(activity => (
-            <div key={activity.id} className="timeline-item">
-              <div className="timeline-dot"></div>
-              <div className="timeline-content">
-                <div className="d-flex justify-content-between mb-1">
-                  <span className={`role-badge-small ${activity.role === 'Admin' ? 'role-admin' : 'role-subscriber'}`}>{activity.role}</span>
-                  <small className="text-muted">{activity.timestamp.split(' ')[1]}</small>
-                </div>
-                <div className="timeline-action">{activity.action}</div>
-                <div className="timeline-user">{activity.user}</div>
-              </div>
-            </div>
-          ))
-          ) : (
-            <div className="text-center text-muted py-3">
-              No recent activity found
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Activity Log */}
-      <div className="activity-section">
-        <div className="mb-4">
-          <h4 className="activity-title">Activity Log</h4>
-          <p className="activity-subtitle mb-3">Complete audit trail of system activities</p>
-        </div>
-
-
-        {/* Table Info */}
-        <div className="mb-3 d-flex justify-content-between">
-          <small className="text-muted">
-            {loading ? 'Loading...' : `Showing ${Math.min(indexOfFirstRecord + 1, totalRecords)} to ${Math.min(indexOfLastRecord, totalRecords)} of ${totalRecords} records`}
-          </small>
-          <small className="text-muted">Page {currentPage} of {totalPages || 1}</small>
-        </div>
-
-        {/* Table */}
-        <div className="table-responsive">
-          <table className="table audit-table">
-            <thead>
-              <tr>{['Timestamp', 'User', 'Role', 'Action', 'Details', 'Status'].map(h => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="6" className="text-center py-4">
-                    <div className="spinner-border text-primary" role="status">
-                      <span className="visually-hidden">Loading...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : currentRecords.length > 0 ? (
-                currentRecords.map(log => (
-                  <tr key={log.id}>
-                    <td className="text-muted">{log.timestamp}</td>
-                    <td className="fw-semibold">{log.user}</td>
-                    <td><span className={`role-badge ${log.role === 'Admin' ? 'role-admin' : 'role-subscriber'}`}>{log.role}</span></td>
-                    <td><span className="action-badge">{log.action}</span></td>
-                    <td>{log.details}</td>
-                    <td>
-                      <span className={`status-badge status-${log.status}`}>{log.status}</span>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="6" className="text-center py-4 text-muted">
-                    No audit logs found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className="d-flex justify-content-between align-items-center mt-4">
-          <button className="btn btn-pagination" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage === 1}>
-            <ChevronLeft size={18} className="me-1" />
-            Previous
-          </button>
-          <div className="pagination-info">
-            <span className="page-number">{currentPage}</span>
-            <span className="text-muted mx-2">of</span>
-            <span className="page-number">{totalPages || 1}</span>
-          </div>
-          <button className="btn btn-pagination" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage === totalPages || totalPages === 0}>
-            Next
-            <ChevronRight size={18} className="ms-1" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default AuditLogs;
