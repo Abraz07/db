@@ -1,91 +1,224 @@
-package com.rwtool.service;
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Bell, X, UserPlus, FileText, LogIn } from 'lucide-react';
+import './AdminNotification.css';
+import adminNotificationService from '../../../services/adminNotificationService';
 
-import com.rwtool.model.UserNotification;
-import com.rwtool.model.UserGroup;
-import com.rwtool.repository.UserNotificationRepository;
-import com.rwtool.repository.UserGroupRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+const AdminNotification = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [activity, setActivity] = useState([]);
+  const containerRef = useRef(null);
+  const [lastSeenAt, setLastSeenAt] = useState(() => {
+    const v = localStorage.getItem('admin_notif_last_seen');
+    return v ? Number(v) : 0;
+  });
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+  // Poll recent activity
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      const data = await adminNotificationService.fetchRecentActivity();
+      if (mounted) setActivity(data);
+    };
+    load();
+    const id = setInterval(load, 10000); // 10s
+    return () => { mounted = false; clearInterval(id); };
+  }, []);
 
-@Service
-public class NotificationService {
+  // Click outside to close
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
 
-    @Autowired
-    private UserNotificationRepository notificationRepository;
-
-    @Autowired
-    private UserGroupRepository userGroupRepository;
-
-    public List<UserNotification> getUserNotifications(String userEmail) {
-        return notificationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail);
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
     }
 
-    public List<UserNotification> getUnreadNotifications(String userEmail) {
-        return notificationRepository
-                .findByUserEmailOrderByCreatedAtDesc(userEmail)
-                .stream()
-                .filter(n -> !n.isRead())
-                .toList();
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  // Map audit items to notifications for UI
+  const notifications = useMemo(() => {
+    const toIcon = (action) => {
+      if (!action) return FileText;
+      const a = action.toUpperCase();
+      if (a.includes('SUBSCRIPTION')) return UserPlus;
+      if (a.includes('LOGIN')) return LogIn;
+      if (a.includes('DOMAIN')) return FileText;
+      if (a.includes('FILE')) return FileText;
+      return FileText;
+    };
+
+    const toTitle = (action) => {
+      if (!action) return 'Activity';
+      const a = action.toUpperCase();
+      if (a.includes('SUBSCRIPTION') && a.includes('REQUEST')) return 'New Subscription Request';
+      if (a.includes('SUBSCRIPTION') && a.includes('APPROVED')) return 'Subscription Approved';
+      if (a.includes('SUBSCRIPTION') && a.includes('REJECTED')) return 'Subscription Rejected';
+      if (a.includes('LOGIN')) return 'User Login';
+      if (a.includes('SIGNUP') || a.includes('REGISTER')) return 'New User Signup';
+      if (a.includes('DOMAIN') && a.includes('ADDED')) return 'Domain Added';
+      if (a.includes('DOMAIN') && a.includes('UPDATED')) return 'Domain Updated';
+      if (a.includes('DOMAIN') && a.includes('DELETED')) return 'Domain Deleted';
+      if (a.includes('FILE')) return 'File Activity';
+      return action;
+    };
+
+    const toMessage = (item) => {
+      const who = item.user || 'Unknown user';
+      const details = item.details || '';
+      return details ? `${details}` : `${who} - ${item.action || 'Activity'}`;
+    };
+
+    const toTime = (ts) => {
+      // item.timestamp expected like 'YYYY-MM-DD HH:mm:ss'
+      try {
+        const d = ts ? new Date(ts.replace(' ', 'T')) : null;
+        if (!d || isNaN(d.getTime())) return 'now';
+        const diffMs = Date.now() - d.getTime();
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''} ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs} hour${hrs > 1 ? 's' : ''} ago`;
+        const days = Math.floor(hrs / 24);
+        return `${days} day${days > 1 ? 's' : ''} ago`;
+      } catch {
+        return 'now';
+      }
+    };
+
+    return (activity || []).map((item, idx) => {
+      const Icon = toIcon(item.action);
+      const actionUpper = (item.action || '').toUpperCase();
+      let type = 'activity';
+      if (actionUpper.includes('SUBSCRIPTION')) type = 'subscription';
+      else if (actionUpper.includes('FILE') || actionUpper.includes('DOMAIN')) type = 'file';
+      else if (actionUpper.includes('LOGIN') || actionUpper.includes('SIGNUP')) type = 'subscription';
+
+      const createdAt = (() => {
+        const d = item.timestamp ? new Date(item.timestamp.replace(' ', 'T')) : null;
+        return d && !isNaN(d.getTime()) ? d.getTime() : Date.now() - idx; // stable fallback ordering
+      })();
+      return {
+        id: `${item.id || createdAt}`,
+        type: type,
+        icon: Icon,
+        title: toTitle(item.action),
+        message: toMessage(item),
+        time: toTime(item.timestamp),
+        createdAt,
+        isNew: createdAt > lastSeenAt
+      };
+    });
+  }, [activity, lastSeenAt]);
+
+  const unreadCount = notifications.filter(n => n.isNew).length;
+
+  const markAsRead = (id) => {
+    const n = notifications.find(x => x.id === id);
+    if (!n) return;
+    const newLastSeen = Math.max(lastSeenAt, n.createdAt);
+    setLastSeenAt(newLastSeen);
+    localStorage.setItem('admin_notif_last_seen', String(newLastSeen));
+  };
+
+  const markAllAsRead = () => {
+    const maxTs = notifications.reduce((m, n) => Math.max(m, n.createdAt || 0), lastSeenAt);
+    setLastSeenAt(maxTs);
+    localStorage.setItem('admin_notif_last_seen', String(maxTs));
+  };
+
+  const removeNotification = (id) => {
+    // Remove from current view only
+    const filtered = notifications.filter(n => n.id !== id);
+    // Recompute lastSeen if removing unread top items
+    const maxTs = filtered.reduce((m, n) => Math.max(m, n.createdAt || 0), 0);
+    if (maxTs < lastSeenAt) {
+      setLastSeenAt(maxTs);
+      localStorage.setItem('admin_notif_last_seen', String(maxTs));
     }
+    setActivity(activity.filter(a => `${a.id || ''}` !== id));
+  };
 
-    public long countUnread(String userEmail) {
-        return notificationRepository.countByUserEmailAndReadIsFalse(userEmail);
-    }
+  const clearAll = () => {
+    const now = Date.now();
+    setLastSeenAt(now);
+    localStorage.setItem('admin_notif_last_seen', String(now));
+    setActivity([]);
+  };
 
-    @Transactional
-    public void markAllAsRead(String userEmail) {
-        List<UserNotification> list = notificationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail);
-        for (UserNotification n : list) {
-            if (!n.isRead()) {
-                n.setRead(true);
-            }
-        }
-        notificationRepository.saveAll(list);
-    }
+  return (
+    <div className="admin-notif-container" ref={containerRef}>
+      <div className="admin-notif-trigger" onClick={() => setIsOpen(!isOpen)}>
+        <Bell size={20} />
+        {unreadCount > 0 && (
+          <span className="admin-notif-badge">{unreadCount}</span>
+        )}
+      </div>
 
-    @Transactional
-    public void clearForUser(String userEmail) {
-        notificationRepository.deleteByUserEmail(userEmail);
-    }
+      {isOpen && (
+        <div className="admin-notif-dropdown">
+          <div className="admin-notif-header">
+            <h5 className="admin-notif-title">Notifications</h5>
+            {unreadCount > 0 && (
+              <button className="admin-mark-all" onClick={markAllAsRead}>
+                Mark all read
+              </button>
+            )}
+          </div>
 
-    @Transactional
-    public void notifyUsersFileSent(String folder, String fileName) {
-        // Find all group members who have access to this folder
-        Set<String> recipients = new HashSet<>();
-        List<UserGroup> groups = userGroupRepository.findAll();
-        for (UserGroup g : groups) {
-            if (g.getFolderAccess() != null && g.getFolderAccess().contains(folder)) {
-                if (g.getMembers() != null) {
-                    recipients.addAll(g.getMembers());
-                }
-            }
-        }
+          <div className="admin-notif-list">
+            {notifications.length === 0 ? (
+              <div className="admin-no-notif">
+                <Bell size={40} />
+                <p>No notifications</p>
+              </div>
+            ) : (
+              notifications.map(notification => {
+                const Icon = notification.icon;
+                return (
+                  <div
+                    key={notification.id}
+                    className={`admin-notif-item ${notification.isNew ? 'unread' : ''}`}
+                    onClick={() => markAsRead(notification.id)}
+                  >
+                    <div className={`admin-notif-icon ${notification.type}`}>
+                      <Icon size={18} />
+                    </div>
+                    <div className="admin-notif-content">
+                      <h6>{notification.title}</h6>
+                      <p>{notification.message}</p>
+                      <span className="admin-notif-time">{notification.time}</span>
+                    </div>
+                    <button
+                      className="admin-notif-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeNotification(notification.id);
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
 
-        if (recipients.isEmpty()) return;
+          {notifications.length > 0 && (
+            <div className="admin-notif-footer">
+              <button className="admin-view-all" onClick={clearAll}>Clear All Notifications</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
-        String title = "New Report Available";
-        String message = "A new file '" + fileName + "' was added to domain '" + folder + "'.";
-        String sourceId = (folder + ":" + fileName).toLowerCase();
-
-        for (String email : recipients) {
-            // avoid duplicate for same source
-            if (notificationRepository.findBySourceId(sourceId).isPresent()) continue;
-
-            UserNotification n = new UserNotification();
-            n.setUserEmail(email);
-            n.setType(UserNotification.Type.file);
-            n.setTitle(title);
-            n.setMessage(message);
-            n.setSourceId(sourceId);
-            n.setRead(false);
-            notificationRepository.save(n);
-        }
-    }
-}
-
-
+export default AdminNotification;
